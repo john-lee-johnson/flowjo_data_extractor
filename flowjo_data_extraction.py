@@ -1,18 +1,22 @@
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+import sys
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                            QHBoxLayout, QLabel, QPushButton, QComboBox, 
+                            QRadioButton, QButtonGroup, QListWidget, QFileDialog,
+                            QGroupBox, QCheckBox, QMessageBox)
+from PyQt6.QtCore import Qt
 import pandas as pd
 import numpy as np
 from scipy import stats
 import pyperclip
-import re
 import traceback
-import sys
- 
-class FlowDataProcessor:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Flow Cytometry Data Processor")
-        
+import warnings
+
+class FlowDataProcessor(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Flow Cytometry Data Processor")
+        self.setMinimumWidth(800)
+    
         # Data storage
         self.sample_map = None
         self.group_map = None
@@ -20,251 +24,197 @@ class FlowDataProcessor:
         self.processed_data = None
         self.sample_well_data = {}
         self.group_well_data = {}
-        
-        # Create main frame
-        self.main_frame = ttk.Frame(root, padding="10")
-        self.main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
-        # Configure column weights
-        self.main_frame.columnconfigure(0, weight=1)
-        
-        # File loading section
-        self.create_file_loading_section()
-        
-        # Data display section
-        self.create_data_display_section()
-        
-        # Analysis options section
-        self.create_analysis_options_section()
-        
-        # Export section
-        self.create_export_section()
+    
+        # Create main widget and layout
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        main_layout = QVBoxLayout(main_widget)
+    
+        # Create sections and add them to main layout
+        main_layout.addWidget(self.create_file_loading_section())
+        main_layout.addWidget(self.create_data_display_section())
+        main_layout.addWidget(self.create_analysis_options_section())
+        main_layout.addWidget(self.create_export_section())
+    
+        # Add credit text at bottom
+        credit_label = QLabel("Inspired by the legendary Dan Piraner")
+        credit_label.setStyleSheet("color: gray; font-style: italic;")  # Style the text
+        credit_label.setAlignment(Qt.AlignmentFlag.AlignRight)  # Align to right
+        main_layout.addWidget(credit_label)
+    
+        self.update_ui_state()
 
     def create_file_loading_section(self):
-        # File loading frame
-        load_frame = ttk.LabelFrame(self.main_frame, text="Load Files", padding="5")
-        load_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
-        load_frame.columnconfigure(1, weight=1)
+        group_box = QGroupBox("Load Files")
+        layout = QVBoxLayout()
         
-        # Sample Map row
-        sample_frame = ttk.Frame(load_frame)
-        sample_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=2)
-        ttk.Button(sample_frame, text="Load Sample Map", 
-                  command=self.load_sample_map).pack(side=tk.LEFT, padx=5)
-        self.sample_status = ttk.Label(sample_frame, text="No Sample Map", foreground="red")
-        self.sample_status.pack(side=tk.LEFT, padx=5)
+        # Sample Map
+        sample_layout = QHBoxLayout()
+        self.load_sample_btn = QPushButton("Load Sample Map")
+        self.load_sample_btn.clicked.connect(self.load_sample_map)
+        self.sample_status = QLabel("No Sample Map")
+        self.sample_status.setStyleSheet("color: red")
+        sample_layout.addWidget(self.load_sample_btn)
+        sample_layout.addWidget(self.sample_status)
+        sample_layout.addStretch()
+        layout.addLayout(sample_layout)
         
-        # Group Map row
-        group_frame = ttk.Frame(load_frame)
-        group_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=2)
-        ttk.Button(group_frame, text="Load Group Map", 
-                  command=self.load_group_map).pack(side=tk.LEFT, padx=5)
-        self.group_status = ttk.Label(group_frame, text="No Group Map", foreground="red")
-        self.group_status.pack(side=tk.LEFT, padx=5)
+        # Group Map
+        group_layout = QHBoxLayout()
+        self.load_group_btn = QPushButton("Load Group Map")
+        self.load_group_btn.clicked.connect(self.load_group_map)
+        self.group_status = QLabel("No Group Map")
+        self.group_status.setStyleSheet("color: red")
+        group_layout.addWidget(self.load_group_btn)
+        group_layout.addWidget(self.group_status)
+        group_layout.addStretch()
+        layout.addLayout(group_layout)
         
-        # Flowjo Data row
-        flow_frame = ttk.Frame(load_frame)
-        flow_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=2)
-        ttk.Button(flow_frame, text="Load Flowjo Data", 
-                  command=self.load_flowjo_data).pack(side=tk.LEFT, padx=5)
-        self.flow_status = ttk.Label(flow_frame, text="No Flowjo Data", foreground="red")
-        self.flow_status.pack(side=tk.LEFT, padx=5)
+        # Flow Data
+        flow_layout = QHBoxLayout()
+        self.load_flow_btn = QPushButton("Load Flow Data")
+        self.load_flow_btn.clicked.connect(self.load_flowjo_data)
+        self.flow_status = QLabel("No Flow Data")
+        self.flow_status.setStyleSheet("color: red")
+        flow_layout.addWidget(self.load_flow_btn)
+        flow_layout.addWidget(self.flow_status)
+        flow_layout.addStretch()
+        layout.addLayout(flow_layout)
+        
+        group_box.setLayout(layout)
+        return group_box
+
 
     def create_data_display_section(self):
-        # Create frames for displaying loaded data
-        self.data_frame = ttk.LabelFrame(self.main_frame, text="Data Analysis", padding="5")
-        self.data_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=10)
-        self.data_frame.columnconfigure(1, weight=1)
-
+        group_box = QGroupBox("Data Analysis")
+        layout = QVBoxLayout()
+        
         # Measurement selection
-        ttk.Label(self.data_frame, text="Select Measurement:").grid(row=0, column=0, padx=5, pady=5)
-        self.measurement_var = tk.StringVar()
-        self.measurement_combo = ttk.Combobox(self.data_frame, textvariable=self.measurement_var, 
-                                            state='disabled', width=60)
-        self.measurement_combo.grid(row=0, column=1, columnspan=2, padx=5, pady=5, sticky=tk.W+tk.E)
-
-        # Create filter frame
-        filter_frame = ttk.LabelFrame(self.data_frame, text="Filter Data")
-        filter_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5, padx=5)
-
-        # Radio buttons for selection type
-        self.filter_type = tk.StringVar(value="sample")
-        ttk.Radiobutton(filter_frame, text="Filter by Samples", 
-                        variable=self.filter_type, 
-                        value="sample",
-                        command=self.update_filter_display).pack(side=tk.LEFT, padx=5)
-        ttk.Radiobutton(filter_frame, text="Filter by Groups", 
-                        variable=self.filter_type, 
-                        value="group",
-                        command=self.update_filter_display).pack(side=tk.LEFT, padx=5)
-
-        # Create selection frame
-        selection_frame = ttk.Frame(self.data_frame)
-        selection_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
-        selection_frame.columnconfigure(0, weight=1)
-
-        # Available options display
-        available_frame = ttk.LabelFrame(selection_frame, text="Available Options")
-        available_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        # Create and configure listbox with extended selection mode
-        self.filter_listbox = tk.Listbox(available_frame, 
-                                        selectmode=tk.EXTENDED, 
-                                        height=6,
-                                        exportselection=False)
-        self.filter_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        # Configure scrollbar
-        scrollbar = ttk.Scrollbar(available_frame, orient=tk.VERTICAL)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        # Link scrollbar and listbox
-        self.filter_listbox.config(yscrollcommand=scrollbar.set)
-        scrollbar.config(command=self.filter_listbox.yview)
-
-        # Initialize with "All" option
-        self.filter_listbox.insert(tk.END, "All")
-        self.filter_listbox.select_set(0)
-
-        # Store options
-        self.sample_options = ["All"]
-        self.group_options = ["All"]
-
-        # Store last clicked index for shift-click functionality
-        self.last_clicked_index = 0
-
-        # Bind mouse events with platform-specific modifications
-        if sys.platform == 'darwin':  # macOS
-            self.filter_listbox.bind('<Button-1>', self.on_listbox_click)
-            self.filter_listbox.bind('<Command-Button-1>', self.on_listbox_cmd_click)
-        else:  # Windows/Linux
-            self.filter_listbox.bind('<Button-1>', self.on_listbox_click)
-            self.filter_listbox.bind('<Control-Button-1>', self.on_listbox_cmd_click)
+        measure_layout = QHBoxLayout()
+        measure_layout.addWidget(QLabel("Select Measurement:"))
+        self.measurement_combo = QComboBox()
+        self.measurement_combo.setEnabled(False)
+        measure_layout.addWidget(self.measurement_combo)
+        layout.addLayout(measure_layout)
+        
+        # Filter options
+        filter_group = QGroupBox("Filter Data")
+        filter_layout = QHBoxLayout()
+        self.filter_type_group = QButtonGroup()
+        self.sample_radio = QRadioButton("Filter by Samples")
+        self.group_radio = QRadioButton("Filter by Groups")
+        self.sample_radio.setChecked(True)
+        self.filter_type_group.addButton(self.sample_radio)
+        self.filter_type_group.addButton(self.group_radio)
+        filter_layout.addWidget(self.sample_radio)
+        filter_layout.addWidget(self.group_radio)
+        filter_group.setLayout(filter_layout)
+        layout.addWidget(filter_group)
+        
+        self.sample_radio.toggled.connect(self.update_filter_list)
+        self.group_radio.toggled.connect(self.update_filter_list)
     
-        self.filter_listbox.bind('<Shift-Button-1>', self.on_listbox_shift_click)
-        self.filter_listbox.bind('<B1-Motion>', self.on_listbox_drag)
-
-    def on_listbox_click(self, event):
-        """Handle single click selection"""
-        index = self.filter_listbox.nearest(event.y)
-        if index >= 0:
-            # Check for Command key on Mac
-            if sys.platform == 'darwin':
-                has_modifier = event.state & 0x08  # Command key
-            else:
-                has_modifier = event.state & 0x04  # Control key
-            
-            if not has_modifier and not (event.state & 0x01):  # No Shift key
-                self.filter_listbox.selection_clear(0, tk.END)
-            self.filter_listbox.selection_set(index)
-            self.filter_listbox.activate(index)
-            self.last_clicked_index = index
-
-    def on_listbox_cmd_click(self, event):
-        """Handle Command/Control-click selection (toggle individual item)"""
-        index = self.filter_listbox.nearest(event.y)
-        if index >= 0:
-            if self.filter_listbox.selection_includes(index):
-                self.filter_listbox.selection_clear(index)
-            else:
-                self.filter_listbox.selection_set(index)
-            self.filter_listbox.activate(index)
-            self.last_clicked_index = index
-
-    def on_listbox_shift_click(self, event):
-        """Handle Shift-click selection (select range)"""
-        index = self.filter_listbox.nearest(event.y)
-        if index >= 0:
-            # Select all items between last clicked and current
-            start = min(self.last_clicked_index, index)
-            end = max(self.last_clicked_index, index)
-            self.filter_listbox.selection_clear(0, tk.END)
-            for i in range(start, end + 1):
-                self.filter_listbox.selection_set(i)
-            self.filter_listbox.activate(index)
-
-    def on_listbox_drag(self, event):
-        """Handle drag selection"""
-        index = self.filter_listbox.nearest(event.y)
-        if index >= 0:
-            # If shift or cmd/ctrl is not held, clear other selections
-            if not (event.state & 0x0001) and not (event.state & 0x0004):
-                self.filter_listbox.selection_clear(0, tk.END)
-            self.filter_listbox.selection_set(index)
-            self.filter_listbox.activate(index)
-            
-    def update_filter_display(self):
-        """Update the listbox based on the selected filter type"""
-        # Store current selection focus
-        current_selection = self.filter_listbox.curselection()
-        focused_index = self.filter_listbox.index(tk.ACTIVE) if current_selection else 0
-    
-        # Clear and repopulate the listbox
-        self.filter_listbox.delete(0, tk.END)
-    
-        # Insert new options without any processing
-        options = self.sample_options if self.filter_type.get() == "sample" else self.group_options
-        for option in options:
-            self.filter_listbox.insert(tk.END, option)
-
-        # Restore selection state
-        if current_selection:
-            try:
-                self.filter_listbox.select_set(focused_index)
-                self.filter_listbox.activate(focused_index)
-            except tk.TclError:
-                # If the previous index is no longer valid, select the first item
-                self.filter_listbox.select_set(0)
-                self.filter_listbox.activate(0)
-        else:
-            self.filter_listbox.select_set(0)
-            self.filter_listbox.activate(0)
+        # Filter list
+        self.filter_list = QListWidget()
+        self.filter_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        self.filter_list.addItem("All")
+        layout.addWidget(self.filter_list)
+        
+        group_box.setLayout(layout)
+        return group_box
         
     def create_analysis_options_section(self):
-        # Analysis options
-        self.analysis_frame = ttk.LabelFrame(self.main_frame, text="Analysis Options", padding="5")
-        self.analysis_frame.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=10)
+        group_box = QGroupBox("Analysis Options")
+        layout = QHBoxLayout()
         
-        self.output_type = tk.StringVar(value="individual")
-        ttk.Radiobutton(self.analysis_frame, text="Individual Replicates", 
-                       variable=self.output_type, value="individual").grid(row=0, column=0, padx=5, pady=5)
-        ttk.Radiobutton(self.analysis_frame, text="Mean & SD", 
-                       variable=self.output_type, value="sd").grid(row=0, column=1, padx=5, pady=5)
-        ttk.Radiobutton(self.analysis_frame, text="Mean & SEM", 
-                       variable=self.output_type, value="sem").grid(row=0, column=2, padx=5, pady=5)
+        self.output_type_group = QButtonGroup()
+        self.individual_radio = QRadioButton("Individual Replicates")
+        self.sd_radio = QRadioButton("Mean & SD")
+        self.sem_radio = QRadioButton("Mean & SEM")
+        
+        self.individual_radio.setChecked(True)
+        self.output_type_group.addButton(self.individual_radio)
+        self.output_type_group.addButton(self.sd_radio)
+        self.output_type_group.addButton(self.sem_radio)
+        
+        layout.addWidget(self.individual_radio)
+        layout.addWidget(self.sd_radio)
+        layout.addWidget(self.sem_radio)
+        layout.addStretch()
+        
+        group_box.setLayout(layout)
+        return group_box
 
+    def update_filter_list(self):
+        # Clear current items
+        self.filter_list.clear()
+    
+        # Add "All" option
+        self.filter_list.addItem("All")
+    
+        # Add other options based on selected filter type
+        if self.sample_radio.isChecked() and self.sample_map is not None:
+            options = sorted(self.sample_map['Value'].unique().tolist())
+            for option in options:
+                self.filter_list.addItem(str(option))
+        elif self.group_radio.isChecked() and self.group_map is not None:
+            options = sorted(self.group_map['Value'].unique().tolist())
+            for option in options:
+                self.filter_list.addItem(str(option))
+            
+        # Select "All" by default
+        self.filter_list.setCurrentRow(0)
+    
     def create_export_section(self):
-        try:
-            # Export frame
-            export_frame = ttk.LabelFrame(self.main_frame, text="Export Options", padding="5")
-            export_frame.grid(row=3, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=10)
+        group_box = QGroupBox("Export Options")
+        layout = QVBoxLayout()
         
-            # Create frame for format options
-            format_frame = ttk.Frame(export_frame)
-            format_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        # Format options
+        format_layout = QHBoxLayout()
+        self.format_group = QButtonGroup()
+        self.standard_radio = QRadioButton("Standard Format")
+        self.single_row_radio = QRadioButton("Single Row Format")
+        self.standard_radio.setChecked(True)
+        self.format_group.addButton(self.standard_radio)
+        self.format_group.addButton(self.single_row_radio)
         
-            # Add format radio buttons
-            self.format_var = tk.StringVar(value="standard")
-            ttk.Radiobutton(format_frame, text="Standard Format", 
-                           variable=self.format_var, value="standard").grid(row=0, column=0, padx=5)
-            ttk.Radiobutton(format_frame, text="Single Row Format", 
-                           variable=self.format_var, value="single_row").grid(row=0, column=1, padx=5)
+        self.include_header_check = QCheckBox("Include Header")
+        self.include_header_check.setChecked(True)
         
-            # Add header checkbox
-            self.include_header = tk.BooleanVar(value=True)
-            ttk.Checkbutton(format_frame, text="Include Header", 
-                           variable=self.include_header).grid(row=0, column=2, padx=5)
+        format_layout.addWidget(self.standard_radio)
+        format_layout.addWidget(self.single_row_radio)
+        format_layout.addWidget(self.include_header_check)
+        format_layout.addStretch()
+        layout.addLayout(format_layout)
         
-            # Add export buttons
-            button_frame = ttk.Frame(export_frame)
-            button_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
-            ttk.Button(button_frame, text="Copy to Clipboard", 
-                      command=self.copy_to_clipboard).grid(row=0, column=0, padx=5)
-            ttk.Button(button_frame, text="Save to CSV", 
-                      command=self.save_to_csv).grid(row=0, column=1, padx=5)
-        except Exception as e:
-            print(f"Error creating export section: {str(e)}")
-            raise
+        # Export buttons
+        button_layout = QHBoxLayout()
+        self.copy_btn = QPushButton("Copy to Clipboard")
+        self.save_btn = QPushButton("Save to CSV")
+        self.copy_btn.clicked.connect(self.copy_to_clipboard)
+        self.save_btn.clicked.connect(self.save_to_csv)
+        
+        button_layout.addWidget(self.copy_btn)
+        button_layout.addWidget(self.save_btn)
+        button_layout.addStretch()
+        layout.addLayout(button_layout)
+        
+        group_box.setLayout(layout)
+        return group_box
+
+    def update_ui_state(self):
+        all_loaded = all([self.sample_map is not None,
+                         self.group_map is not None,
+                         self.flow_data is not None])
+        
+        self.measurement_combo.setEnabled(all_loaded)
+        self.filter_list.setEnabled(all_loaded)
+        self.individual_radio.setEnabled(all_loaded)
+        self.sd_radio.setEnabled(all_loaded)
+        self.sem_radio.setEnabled(all_loaded)
+        self.copy_btn.setEnabled(all_loaded)
+        self.save_btn.setEnabled(all_loaded)
+        
 
     def view_sample_plate(self):
         WellPlateViewer(self.root, "Sample Map Plate View", self.sample_well_data)
@@ -325,82 +275,91 @@ class FlowDataProcessor:
         return pd.DataFrame(well_data), well_dict
     
     def load_sample_map(self):
-        filename = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")])
+        filename, _ = QFileDialog.getOpenFileName(self, "Load Sample Map",
+                                                "", "Excel Files (*.xlsx *.xls)")
         if filename:
             try:
                 df = pd.read_excel(filename)
                 self.sample_map, self.sample_well_data = self.process_plate_map(df)
-                self.sample_status.config(text="LOADED", foreground="green")
-            
+                self.sample_status.setText("LOADED")
+                self.sample_status.setStyleSheet("color: green")
+                
                 # Update sample options
-                self.sample_options = ["All"] + sorted(self.sample_map['Value'].unique().tolist())
-            
-                # Update display if currently showing samples
-                if self.filter_type.get() == "sample":
-                    self.update_filter_display()
-            
-                self.check_all_files_loaded()
+                if self.sample_radio.isChecked():
+                    self.update_filter_list()
+                
+                self.update_ui_state()
+                
             except Exception as e:
-                self.sample_status.config(text="LOAD ERROR", foreground="red")
-                messagebox.showerror("Error", f"Error loading Sample Map: {str(e)}")
-
+                self.sample_status.setText("LOAD ERROR")
+                self.sample_status.setStyleSheet("color: red")
+                QMessageBox.critical(self, "Error", f"Error loading Sample Map: {str(e)}")
+                
     def load_group_map(self):
-        filename = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")])
+        filename, _ = QFileDialog.getOpenFileName(self, "Load Group Map",
+                                                "", "Excel Files (*.xlsx *.xls)")
         if filename:
             try:
-                df = pd.read_excel(filename)
+                df = pd.read_excel(filename)         
                 self.group_map, self.group_well_data = self.process_plate_map(df)
-                self.group_status.config(text="LOADED", foreground="green")
+                self.group_status.setText("LOADED")
+                self.group_status.setStyleSheet("color: green")
             
-                # Update group options
-                self.group_options = ["All"] + sorted(self.group_map['Value'].unique().tolist())
+                # Update sample options
+                if self.group_radio.isChecked():
+                    self.update_filter_list()
             
-                # Update display if currently showing groups
-                if self.filter_type.get() == "group":
-                    self.update_filter_display()
-            
-                self.check_all_files_loaded()
+                self.update_ui_state()
+                
             except Exception as e:
-                self.group_status.config(text="LOAD ERROR", foreground="red")
-                messagebox.showerror("Error", f"Error loading Group Map: {str(e)}")
-
+                self.group_status.setText("LOAD ERROR")
+                self.group_status.setStyleSheet("color: red")
+                QMessageBox.critical(self, "Error", f"Error loading Group Map: {str(e)}")
+            
     def load_flowjo_data(self):
-        filename = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")])
+        filename, _ = QFileDialog.getOpenFileName(self, "Load Flowjo data",
+                                                "", "Excel Files (*.xlsx *.xls)")
         if filename:
             try:
                 # Read the Excel file
                 self.flow_data = pd.read_excel(filename)
-            
+        
                 # Rename the first column to "Sample Name"
                 self.flow_data = self.flow_data.rename(columns={self.flow_data.columns[0]: "Sample Name"})
-            
+                
+                # Filter out "Mean" and "SD" rows
+                self.flow_data = self.flow_data[~self.flow_data['Sample Name'].isin(['Mean', 'SD'])]
+        
                 # Convert percentage columns to float
                 for col in self.flow_data.columns:
                     if self.flow_data[col].astype(str).str.contains('%').any():
                         # Remove '%' and convert to float
                         self.flow_data[col] = self.flow_data[col].astype(str).str.replace('%', '').astype(float)
-                        
-            
+                    
                 # Extract plate positions from sample names
                 self.flow_data['Well'] = self.flow_data['Sample Name'].str.extract(r'_([A-H]\d{2})\.fcs$')
-            
+        
                 # Update measurement combo box
                 measurements = self.flow_data.columns[1:-1].tolist()  # Exclude Sample Name and Well columns
-                self.measurement_combo['values'] = measurements
-                self.measurement_combo['state'] = 'readonly'
+                self.measurement_combo.clear()  # Clear existing items
+                self.measurement_combo.addItems(measurements)  # Add new items
+                self.measurement_combo.setEnabled(True)  # Enable the combo box
                 if measurements:
-                    self.measurement_combo.set(measurements[0])
-            
+                    self.measurement_combo.setCurrentIndex(0)  # Set first item as current
+        
                 print("\nFlowjo Data Structure:")
                 print(self.flow_data.head())
                 print("\nColumn Types:")
                 print(self.flow_data.dtypes)
             
-                self.flow_status.config(text="LOADED", foreground="green")
-                self.check_all_files_loaded()
+                self.flow_status.setText("LOADED")
+                self.flow_status.setStyleSheet("color: green")
+                self.update_ui_state()
+            
             except Exception as e:
-                self.flow_status.config(text="LOAD ERROR", foreground="red")
-                messagebox.showerror("Error", f"Error loading Flowjo Data: {str(e)}")
+                self.flow_status.setText("LOAD ERROR")
+                self.flow_status.setStyleSheet("color: red")
+                QMessageBox.critical(self, "Error", f"Error loading Flowjo data: {str(e)}")
             
     def check_all_files_loaded(self):
         # Enable/disable analysis options based on whether all files are loaded
@@ -424,15 +383,16 @@ class FlowDataProcessor:
 
     def process_data(self):
         if not all([self.sample_map is not None, self.group_map is not None, self.flow_data is not None]):
-            messagebox.showerror("Error", "Please load all required files first")
+            QMessageBox.critical(self, "Error", "Please load all required files first")
             return None
 
-        selected_measurement = self.measurement_var.get()
+        selected_measurement = self.measurement_combo.currentText()
         if not selected_measurement:
-            messagebox.showerror("Error", "Please select a measurement")
+            QMessageBox.critical(self, "Error", "Please select a measurement")
             return None
 
         try:
+
             # Merge flow data with sample information first
             merged_data = self.flow_data.merge(
                 self.sample_map,
@@ -440,7 +400,7 @@ class FlowDataProcessor:
                 how='left'
             )
             merged_data = merged_data.rename(columns={'Value': 'Sample'})
-        
+    
             # Then merge with group information
             merged_data = merged_data.merge(
                 self.group_map,
@@ -448,29 +408,28 @@ class FlowDataProcessor:
                 how='left'
             )
             merged_data = merged_data.rename(columns={'Value': 'Group'})
-        
-            # Get selected options
-            selected_indices = self.filter_listbox.curselection()
-            if not selected_indices:  # If nothing is selected, assume "All"
+
+            # Get selected options from QListWidget
+            selected_items = self.filter_list.selectedItems()
+            if not selected_items:  # If nothing is selected, assume "All"
                 selected_options = ["All"]
             else:
-                selected_options = [self.filter_listbox.get(idx) for idx in selected_indices]
-        
+                selected_options = [item.text() for item in selected_items]
+    
             # Apply filters based on selection type
-            if self.filter_type.get() == "sample" and "All" not in selected_options:
+            if self.sample_radio.isChecked() and "All" not in selected_options:
                 merged_data = merged_data[merged_data['Sample'].isin(selected_options)]
-            elif self.filter_type.get() == "group" and "All" not in selected_options:
+            elif self.group_radio.isChecked() and "All" not in selected_options:
                 merged_data = merged_data[merged_data['Group'].isin(selected_options)]
-            
-            # Ensure numeric type for selected measurement
-            merged_data[selected_measurement] = pd.to_numeric(merged_data[selected_measurement], errors='coerce')
         
+            # Ensure numeric type for selected measurement and round to 2 decimal places
+            merged_data[selected_measurement] = pd.to_numeric(merged_data[selected_measurement], errors='coerce').round(2)
+    
             # Process based on selected output type
-            output_type = self.output_type.get()
-            if output_type == "individual":
+            if self.individual_radio.isChecked():
                 # Use cumcount to number the replicates within each Sample-Group combination
                 merged_data['Replicate'] = merged_data.groupby(['Sample', 'Group']).cumcount()
-            
+        
                 # Pivot the data to get replicates as columns
                 result = pd.pivot_table(
                     merged_data,
@@ -479,37 +438,63 @@ class FlowDataProcessor:
                     columns=['Group', 'Replicate'],
                     aggfunc='first'  # Each value should appear only once
                 )
-            
+        
                 # Flatten column names to just use the group name
                 result.columns = [f"{col[0]}" for col in result.columns]
-            
+        
                 # Sort columns to keep groups together
                 result = result.reindex(sorted(result.columns), axis=1)
-            
+        
                 # Set index name to None to remove "Sample" row
                 result.index.name = None
-            
+        
             else:  # Mean & SD/SEM
+                # Calculate means and errors for each group
                 grouped = merged_data.groupby(['Sample', 'Group'])[selected_measurement]
-                means = grouped.mean().unstack()
-                means.index.name = None
+                means = grouped.mean().round(2)
             
-                if output_type == "sd":
-                    errors = grouped.std().unstack()
-                else:  # SEM
-                    errors = grouped.agg(lambda x: stats.sem(x, nan_policy='omit')).unstack()
+                if self.sd_radio.isChecked():
+                    errors = grouped.std().round(2)
+                    error_label = "SD"
+                else:  # Mean & SEM
+                    # Temporarily suppress the SmallSampleWarning
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        errors = grouped.agg(lambda x: stats.sem(x, nan_policy='omit')).round(2)
             
-                errors.index.name = None
-                result = pd.concat([means, errors], keys=['Mean', 'Error'])
+                # Create a new DataFrame to store the reorganized data
+                unique_groups = sorted(merged_data['Group'].unique())
+                new_columns = []
+                new_data = {}
+            
+                # Create alternating Mean and SD/SEM columns for each group
+                for group in unique_groups:
+                    mean_col = f"{group}_Mean"
+                    error_col = f"{group}_{error_label}"
+                    new_columns.extend([mean_col, error_col])
+                
+                    # Get the data for this group
+                    group_means = means[means.index.get_level_values('Group') == group]
+                    group_errors = errors[errors.index.get_level_values('Group') == group]
+                
+                    # Store the data using sample names as index
+                    new_data[mean_col] = {idx[0]: val for idx, val in group_means.items()}
+                    new_data[error_col] = {idx[0]: val for idx, val in group_errors.items()}
+            
+                # Create the final DataFrame
+                result = pd.DataFrame(new_data, columns=new_columns)
+            
+                # Clean up the index name
+                result.index.name = None
 
             return result
 
         except Exception as e:
             print(f"Error details: {str(e)}")
             print("Traceback:", traceback.format_exc())
-            messagebox.showerror("Error", f"Error processing data: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Error processing data: {str(e)}")
             return None
-    
+        
     def reshape_to_single_row(self, df):
         """
         Reshape data to single row format with combined Sample_Group headers using pandas melt.
@@ -572,9 +557,9 @@ class FlowDataProcessor:
             result = self.process_data()
             if result is not None:
                 # Get format choice
-                format_choice = self.format_var.get()
-                include_header = self.include_header.get()
-            
+                format_choice = "single_row" if self.single_row_radio.isChecked() else "standard"
+                include_header = self.include_header_check.isChecked()
+        
                 if format_choice == "single_row":
                     print("\nConverting to single row format")
                     print("Original data:")
@@ -585,55 +570,56 @@ class FlowDataProcessor:
                 else:
                     # For standard format, keep the index (sample names)
                     include_index = True
-            
+        
                 # Convert to string with specific options for clean output
                 result_str = result.to_csv(
                     sep='\t',
                     index=include_index,  # Include index for standard format
                     header=include_header
                 )
-            
+        
                 # Remove any empty lines that might have been added
                 result_str = '\n'.join(line for line in result_str.split('\n') if line.strip())
-            
                 pyperclip.copy(result_str)
-            
+        
         except Exception as e:
             print(f"Error details: {str(e)}")
             print("Traceback:", traceback.format_exc())
-            messagebox.showerror("Error", f"Error copying to clipboard: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Error copying to clipboard: {str(e)}")
         
     def save_to_csv(self):
         try:
             result = self.process_data()
             if result is not None:
-                filename = filedialog.asksaveasfilename(
-                    defaultextension=".csv",
-                    filetypes=[("CSV files", "*.csv")]
+                filename, _ = QFileDialog.getSaveFileName(
+                    self,
+                    "Save CSV File",
+                    "",
+                    "CSV files (*.csv)"
                 )
                 if filename:
-                    if self.format_var.get() == "single_row" and not isinstance(result.index, pd.MultiIndex):
+                    if not filename.endswith('.csv'):
+                        filename += '.csv'
+                    
+                    if self.single_row_radio.isChecked() and not isinstance(result.index, pd.MultiIndex):
                         result = self.reshape_to_single_row(result)
+                    
                     result.to_csv(
                         filename,
                         index=isinstance(result.index, pd.MultiIndex),
-                        header=self.include_header.get()
+                        header=self.include_header_check.isChecked()
                     )
-                    messagebox.showinfo("Success", "Data saved to CSV")
+                    QMessageBox.information(self, "Success", "Data saved to CSV")
                 
         except Exception as e:
             print(f"Error details: {str(e)}")
-            messagebox.showerror("Error", f"Error saving to CSV: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Error saving to CSV: {str(e)}")
 
 def main():
-    root = tk.Tk()
-    app = FlowDataProcessor(root)
-    
-    # Configure better event handling
-    root.update_idletasks()
-    root.after(100, root.update_idletasks)  # Schedule periodic updates
-    
-    root.mainloop()
+    app = QApplication(sys.argv)
+    window = FlowDataProcessor()
+    window.show()
+    sys.exit(app.exec())
 
 if __name__ == "__main__":
     main()
