@@ -17,30 +17,6 @@ A graphical user interface (GUI) tool for processing and analyzing flow cytometr
   - Save to CSV
   - Optional headers
 
-## Installation
-
-1. Clone the repository:
-   ```bash
-   git clone john-lee-johnson/flowjo-data/extractor
-   ```
-
-2. Install the required packages:
-   ```bash
-   pip install PyQt6 pandas numpy scipy pyperclip openpyxl xlrd
-   ```
-
-## Usage
-
-1. Start the program:
-   ```bash
-   python3 flowjo_data_extraction.py
-   ```
-
-2. Load your data files:
-   - **Sample Map**: Excel file mapping well positions to sample names
-   - **Group Map**: Excel file mapping well positions to group names
-   - **FlowJo Data**: Excel file exported from FlowJo
-
 ### Required File Formats
 
 #### Sample and Group Maps
@@ -66,6 +42,38 @@ B  WT   WT   KO   KO
 - First column should contain sample names
   - Sample names don't need to match the sample map, but the wells need to match
 - Additional columns contain measurements
+
+## Installation
+1. Make a folder to hold the program (e.g., Documents/scripts/)
+2. Open terminal (using Launchpad or Applications folder)
+3. Navigate to the folder you just created
+   ```bash
+   cd ~/Documents/scripts/
+   ```
+4. Clone the repository:
+   ```bash
+   git clone john-lee-johnson/flowjo-data-extractor
+   ```
+5. Install the required packages:
+   ```bash
+   pip3 install PyQt6 pandas numpy scipy pyperclip openpyxl xlrd
+   ```
+
+## Usage
+
+1. With the terminal open, go to the folder you downloaded
+   ```bash
+   cd ~/Documents/scripts/flowjo-data-extractor
+   ```
+2. Start the program:
+   ```bash
+   python3 flowjo_data_extraction.py
+   ```
+
+3. Load your data files:
+   - **Sample Map**: Excel file mapping well positions to sample names
+   - **Group Map**: Excel file mapping well positions to group names
+   - **FlowJo Data**: Excel file exported from FlowJo
 
 ### Analysis Options
 
