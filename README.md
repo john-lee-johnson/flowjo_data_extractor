@@ -52,7 +52,7 @@ B  WT   WT   KO   KO
    ```
 4. Clone the repository:
    ```bash
-   git clone john-lee-johnson/flowjo-data-extractor
+   git clone https://github.com/john-lee-johnson/flowjo-data-extractor
    ```
 5. Install the required packages:
    ```bash
