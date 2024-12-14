@@ -24,6 +24,8 @@ class FlowDataProcessor(QMainWindow):
         self.processed_data = None
         self.sample_well_data = {}
         self.group_well_data = {}
+        self.sample_order = None  # Store sample order from column 14
+        self.group_order = None   # Store group order from column 14
     
         # Create main widget and layout
         main_widget = QWidget()
@@ -38,8 +40,8 @@ class FlowDataProcessor(QMainWindow):
     
         # Add credit text at bottom
         credit_label = QLabel("Inspired by the legendary Dan Piraner")
-        credit_label.setStyleSheet("color: gray; font-style: italic;")  # Style the text
-        credit_label.setAlignment(Qt.AlignmentFlag.AlignRight)  # Align to right
+        credit_label.setStyleSheet("color: gray; font-style: italic;")
+        credit_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         main_layout.addWidget(credit_label)
     
         self.update_ui_state()
@@ -84,6 +86,161 @@ class FlowDataProcessor(QMainWindow):
         group_box.setLayout(layout)
         return group_box
 
+    def load_sample_map(self):
+        filename, _ = QFileDialog.getOpenFileName(self, "Load Sample Map",
+                                                "", "Excel Files (*.xlsx *.xls)")
+        if filename:
+            try:
+                # Read the entire Excel file
+                df = pd.read_excel(filename)
+                
+                # Extract sample order from column 14 (index 13), starting from row 1 excluding header
+                self.sample_order = df.iloc[0:, 13].dropna().tolist()
+                print(f"Loaded sample order from column 14: {self.sample_order}")
+                
+                # Process the plate map as before
+                self.sample_map, self.sample_well_data = self.process_plate_map(df)
+                self.sample_status.setText("LOADED")
+                self.sample_status.setStyleSheet("color: green")
+                
+                # Update sample options
+                if self.sample_radio.isChecked():
+                    self.update_filter_list()
+                
+                self.update_ui_state()
+                
+            except Exception as e:
+                self.sample_status.setText("LOAD ERROR")
+                self.sample_status.setStyleSheet("color: red")
+                QMessageBox.critical(self, "Error", f"Error loading Sample Map: {str(e)}")
+
+    def process_data(self):
+        if not all([self.sample_map is not None, self.group_map is not None, self.flow_data is not None]):
+            QMessageBox.critical(self, "Error", "Please load all required files first")
+            return None
+
+        selected_measurement = self.measurement_combo.currentText()
+        if not selected_measurement:
+            QMessageBox.critical(self, "Error", "Please select a measurement")
+            return None
+
+        try:
+            # Merge flow data with sample information first
+            merged_data = self.flow_data.merge(
+                self.sample_map,
+                on='Well',
+                how='left'
+            )
+            merged_data = merged_data.rename(columns={'Value': 'Sample'})
+    
+            # Then merge with group information
+            merged_data = merged_data.merge(
+                self.group_map,
+                on='Well',
+                how='left'
+            )
+            merged_data = merged_data.rename(columns={'Value': 'Group'})
+
+            # Get selected options from QListWidget
+            selected_items = self.filter_list.selectedItems()
+            if not selected_items:
+                selected_options = ["All"]
+            else:
+                selected_options = [item.text() for item in selected_items]
+    
+            # Apply filters based on selection type
+            if self.sample_radio.isChecked() and "All" not in selected_options:
+                merged_data = merged_data[merged_data['Sample'].isin(selected_options)]
+            elif self.group_radio.isChecked() and "All" not in selected_options:
+                merged_data = merged_data[merged_data['Group'].isin(selected_options)]
+        
+            merged_data[selected_measurement] = pd.to_numeric(merged_data[selected_measurement], errors='coerce').round(2)
+    
+            if self.individual_radio.isChecked():
+                # Get groups in the specified order
+                if self.group_order:
+                    valid_groups = set(merged_data['Group'].unique())
+                    ordered_groups = [group for group in self.group_order if group in valid_groups]
+                    remaining_groups = sorted(list(valid_groups - set(ordered_groups)))
+                    unique_groups = ordered_groups + remaining_groups
+                else:
+                    unique_groups = sorted(merged_data['Group'].unique())
+
+                # Add replicate numbers
+                merged_data['Replicate'] = merged_data.groupby(['Sample', 'Group']).cumcount()
+                
+                # Create pivot table
+                result = pd.pivot_table(
+                    merged_data,
+                    values=selected_measurement,
+                    index='Sample',
+                    columns=['Group', 'Replicate'],
+                    aggfunc='first'
+                )
+                
+                # Reorder columns to keep replicates together within each group
+                max_replicates = merged_data['Replicate'].max() + 1
+                new_columns = []
+                for group in unique_groups:
+                    for rep in range(max_replicates):
+                        if (group, rep) in result.columns:
+                            new_columns.append((group, rep))
+                
+                # Reorder the columns and flatten the column names
+                result = result.reindex(columns=new_columns)
+                result.columns = [f"{col[0]}" for col in result.columns]
+                result.index.name = None
+                
+            else:  # Mean & SD/SEM
+                grouped = merged_data.groupby(['Sample', 'Group'])[selected_measurement]
+                means = grouped.mean().round(2)
+            
+                if self.sd_radio.isChecked():
+                    errors = grouped.std().round(2)
+                    error_label = "SD"
+                else:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        errors = grouped.agg(lambda x: stats.sem(x, nan_policy='omit')).round(2)
+            
+                # Get unique groups in the specified order if available
+                if self.group_order:
+                    valid_groups = set(merged_data['Group'].unique())
+                    ordered_groups = [group for group in self.group_order if group in valid_groups]
+                    remaining_groups = sorted(list(valid_groups - set(ordered_groups)))
+                    unique_groups = ordered_groups + remaining_groups
+                else:
+                    unique_groups = sorted(merged_data['Group'].unique())
+
+                new_columns = []
+                new_data = {}
+            
+                for group in unique_groups:
+                    mean_col = f"{group}_Mean"
+                    error_col = f"{group}_{error_label}"
+                    new_columns.extend([mean_col, error_col])
+                
+                    group_means = means[means.index.get_level_values('Group') == group]
+                    group_errors = errors[errors.index.get_level_values('Group') == group]
+                
+                    new_data[mean_col] = {idx[0]: val for idx, val in group_means.items()}
+                    new_data[error_col] = {idx[0]: val for idx, val in group_errors.items()}
+            
+                result = pd.DataFrame(new_data, columns=new_columns)
+                result.index.name = None
+
+            # Apply sample order if available
+            if self.sample_order:
+                valid_order = [sample for sample in self.sample_order if sample in result.index]
+                result = result.reindex(valid_order)
+
+            return result
+
+        except Exception as e:
+            print(f"Error details: {str(e)}")
+            print("Traceback:", traceback.format_exc())
+            QMessageBox.critical(self, "Error", f"Error processing data: {str(e)}")
+            return None
 
     def create_data_display_section(self):
         group_box = QGroupBox("Data Analysis")
@@ -154,13 +311,40 @@ class FlowDataProcessor(QMainWindow):
     
         # Add other options based on selected filter type
         if self.sample_radio.isChecked() and self.sample_map is not None:
-            options = sorted(self.sample_map['Value'].unique().tolist())
-            for option in options:
-                self.filter_list.addItem(str(option))
+            if self.sample_order:
+                # Use sample order if available
+                valid_samples = set(self.sample_map['Value'].unique())
+                ordered_samples = [sample for sample in self.sample_order if sample in valid_samples]
+                
+                # Add any remaining samples that weren't in the order list
+                remaining_samples = sorted(list(valid_samples - set(ordered_samples)))
+                all_samples = ordered_samples + remaining_samples
+                
+                for sample in all_samples:
+                    self.filter_list.addItem(str(sample))
+            else:
+                # Default to alphabetical order if no sample order provided
+                options = sorted(self.sample_map['Value'].unique().tolist())
+                for option in options:
+                    self.filter_list.addItem(str(option))
+                    
         elif self.group_radio.isChecked() and self.group_map is not None:
-            options = sorted(self.group_map['Value'].unique().tolist())
-            for option in options:
-                self.filter_list.addItem(str(option))
+            if self.group_order:
+                # Use group order if available
+                valid_groups = set(self.group_map['Value'].unique())
+                ordered_groups = [group for group in self.group_order if group in valid_groups]
+                
+                # Add any remaining groups that weren't in the order list
+                remaining_groups = sorted(list(valid_groups - set(ordered_groups)))
+                all_groups = ordered_groups + remaining_groups
+                
+                for group in all_groups:
+                    self.filter_list.addItem(str(group))
+            else:
+                # Default to alphabetical order if no group order provided
+                options = sorted(self.group_map['Value'].unique().tolist())
+                for option in options:
+                    self.filter_list.addItem(str(option))
             
         # Select "All" by default
         self.filter_list.setCurrentRow(0)
@@ -273,39 +457,25 @@ class FlowDataProcessor(QMainWindow):
             print(f"{well}: {well_dict[well]}")
         
         return pd.DataFrame(well_data), well_dict
-    
-    def load_sample_map(self):
-        filename, _ = QFileDialog.getOpenFileName(self, "Load Sample Map",
-                                                "", "Excel Files (*.xlsx *.xls)")
-        if filename:
-            try:
-                df = pd.read_excel(filename)
-                self.sample_map, self.sample_well_data = self.process_plate_map(df)
-                self.sample_status.setText("LOADED")
-                self.sample_status.setStyleSheet("color: green")
-                
-                # Update sample options
-                if self.sample_radio.isChecked():
-                    self.update_filter_list()
-                
-                self.update_ui_state()
-                
-            except Exception as e:
-                self.sample_status.setText("LOAD ERROR")
-                self.sample_status.setStyleSheet("color: red")
-                QMessageBox.critical(self, "Error", f"Error loading Sample Map: {str(e)}")
                 
     def load_group_map(self):
         filename, _ = QFileDialog.getOpenFileName(self, "Load Group Map",
                                                 "", "Excel Files (*.xlsx *.xls)")
         if filename:
             try:
-                df = pd.read_excel(filename)         
+                # Read the entire Excel file
+                df = pd.read_excel(filename)
+                
+                # Extract group order from column 14 (index 13), starting from row 1 (ignoring the header)
+                self.group_order = df.iloc[0:, 13].dropna().tolist()
+                print(f"Loaded group order from column 14: {self.group_order}")
+                
+                # Process the plate map as before
                 self.group_map, self.group_well_data = self.process_plate_map(df)
                 self.group_status.setText("LOADED")
                 self.group_status.setStyleSheet("color: green")
             
-                # Update sample options
+                # Update group options
                 if self.group_radio.isChecked():
                     self.update_filter_list()
             
@@ -380,120 +550,6 @@ class FlowDataProcessor(QMainWindow):
         for child in self.data_frame.winfo_children():
             if isinstance(child, ttk.Radiobutton):
                 child.configure(state=state)
-
-    def process_data(self):
-        if not all([self.sample_map is not None, self.group_map is not None, self.flow_data is not None]):
-            QMessageBox.critical(self, "Error", "Please load all required files first")
-            return None
-
-        selected_measurement = self.measurement_combo.currentText()
-        if not selected_measurement:
-            QMessageBox.critical(self, "Error", "Please select a measurement")
-            return None
-
-        try:
-
-            # Merge flow data with sample information first
-            merged_data = self.flow_data.merge(
-                self.sample_map,
-                on='Well',
-                how='left'
-            )
-            merged_data = merged_data.rename(columns={'Value': 'Sample'})
-    
-            # Then merge with group information
-            merged_data = merged_data.merge(
-                self.group_map,
-                on='Well',
-                how='left'
-            )
-            merged_data = merged_data.rename(columns={'Value': 'Group'})
-
-            # Get selected options from QListWidget
-            selected_items = self.filter_list.selectedItems()
-            if not selected_items:  # If nothing is selected, assume "All"
-                selected_options = ["All"]
-            else:
-                selected_options = [item.text() for item in selected_items]
-    
-            # Apply filters based on selection type
-            if self.sample_radio.isChecked() and "All" not in selected_options:
-                merged_data = merged_data[merged_data['Sample'].isin(selected_options)]
-            elif self.group_radio.isChecked() and "All" not in selected_options:
-                merged_data = merged_data[merged_data['Group'].isin(selected_options)]
-        
-            # Ensure numeric type for selected measurement and round to 2 decimal places
-            merged_data[selected_measurement] = pd.to_numeric(merged_data[selected_measurement], errors='coerce').round(2)
-    
-            # Process based on selected output type
-            if self.individual_radio.isChecked():
-                # Use cumcount to number the replicates within each Sample-Group combination
-                merged_data['Replicate'] = merged_data.groupby(['Sample', 'Group']).cumcount()
-        
-                # Pivot the data to get replicates as columns
-                result = pd.pivot_table(
-                    merged_data,
-                    values=selected_measurement,
-                    index='Sample',
-                    columns=['Group', 'Replicate'],
-                    aggfunc='first'  # Each value should appear only once
-                )
-        
-                # Flatten column names to just use the group name
-                result.columns = [f"{col[0]}" for col in result.columns]
-        
-                # Sort columns to keep groups together
-                result = result.reindex(sorted(result.columns), axis=1)
-        
-                # Set index name to None to remove "Sample" row
-                result.index.name = None
-        
-            else:  # Mean & SD/SEM
-                # Calculate means and errors for each group
-                grouped = merged_data.groupby(['Sample', 'Group'])[selected_measurement]
-                means = grouped.mean().round(2)
-            
-                if self.sd_radio.isChecked():
-                    errors = grouped.std().round(2)
-                    error_label = "SD"
-                else:  # Mean & SEM
-                    # Temporarily suppress the SmallSampleWarning
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("ignore")
-                        errors = grouped.agg(lambda x: stats.sem(x, nan_policy='omit')).round(2)
-            
-                # Create a new DataFrame to store the reorganized data
-                unique_groups = sorted(merged_data['Group'].unique())
-                new_columns = []
-                new_data = {}
-            
-                # Create alternating Mean and SD/SEM columns for each group
-                for group in unique_groups:
-                    mean_col = f"{group}_Mean"
-                    error_col = f"{group}_{error_label}"
-                    new_columns.extend([mean_col, error_col])
-                
-                    # Get the data for this group
-                    group_means = means[means.index.get_level_values('Group') == group]
-                    group_errors = errors[errors.index.get_level_values('Group') == group]
-                
-                    # Store the data using sample names as index
-                    new_data[mean_col] = {idx[0]: val for idx, val in group_means.items()}
-                    new_data[error_col] = {idx[0]: val for idx, val in group_errors.items()}
-            
-                # Create the final DataFrame
-                result = pd.DataFrame(new_data, columns=new_columns)
-            
-                # Clean up the index name
-                result.index.name = None
-
-            return result
-
-        except Exception as e:
-            print(f"Error details: {str(e)}")
-            print("Traceback:", traceback.format_exc())
-            QMessageBox.critical(self, "Error", f"Error processing data: {str(e)}")
-            return None
         
     def reshape_to_single_row(self, df):
         """
