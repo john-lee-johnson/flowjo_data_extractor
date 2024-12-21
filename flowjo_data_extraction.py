@@ -139,7 +139,7 @@ class FlowDataProcessor(QMainWindow):
     def process_data(self):
         if not all([self.sample_map is not None, 
                     self.group_map is not None, 
-                    len(self.flow_data_files) > 0]):  # Changed this check
+                    len(self.flow_data_files) > 0]):
             QMessageBox.critical(self, "Error", "Please load all required files first")
             return None
 
@@ -151,7 +151,7 @@ class FlowDataProcessor(QMainWindow):
         try:
             # Process each flow data file
             results = []
-            for flow_data in self.flow_data_files:  # Iterate through all flow data files
+            for flow_data in self.flow_data_files:
                 # Merge flow data with sample information first
                 merged_data = flow_data.merge(
                     self.sample_map,
@@ -159,7 +159,16 @@ class FlowDataProcessor(QMainWindow):
                     how='left'
                 )
                 merged_data = merged_data.rename(columns={'Value': 'Sample'})
-        
+    
+                # Check if Sample column is all NaN
+                if merged_data['Sample'].isna().all():
+                    QMessageBox.warning(
+                        self,
+                        "Warning",
+                        "No matches found in Sample Map. Please check that well positions in your Sample Map match the data file."
+                    )
+                    return None
+
                 # Then merge with group information
                 merged_data = merged_data.merge(
                     self.group_map,
@@ -168,6 +177,14 @@ class FlowDataProcessor(QMainWindow):
                 )
                 merged_data = merged_data.rename(columns={'Value': 'Group'})
 
+                # Check if Group column is all NaN
+                if merged_data['Group'].isna().all():
+                    QMessageBox.warning(
+                        self,
+                        "Warning",
+                        "No matches found in Group Map. Please check that well positions in your Group Map match the data file."
+                    )
+                    return None
                 # Get selected options from QListWidget
                 selected_items = self.filter_list.selectedItems()
                 if not selected_items:
@@ -206,6 +223,8 @@ class FlowDataProcessor(QMainWindow):
                         aggfunc='first'
                     )
                     
+                    
+
                     # Convert max_replicates to integer
                     max_replicates = int(merged_data['Replicate'].max() + 1)
                     new_columns = []
@@ -515,9 +534,6 @@ class FlowDataProcessor(QMainWindow):
             row_data = df.iloc[row_idx]
             num_cols = len(row_data)  # Get total number of columns
         
-            print(f"\nProcessing row {row_idx+1} (Row {row_letter}):")
-            print(f"Row data: {row_data.values}")
-        
             # Process each column, starting from column 1 (index 1)
             for col_idx in range(1, num_cols):
                 try:
@@ -529,15 +545,10 @@ class FlowDataProcessor(QMainWindow):
                             'Value': value
                         })
                         well_dict[well_position] = value
-                        print(f"Processed well {well_position}: {value}")  # Debug output
                 except IndexError as e:
                     print(f"IndexError at row {row_letter}, column {col_idx}: {e}")
                     continue
     
-        print("\nProcessed wells summary:")
-        for well in sorted(well_dict.keys()):
-            print(f"{well}: {well_dict[well]}")
-        
         return pd.DataFrame(well_data), well_dict
                 
     def load_group_map(self):
@@ -626,84 +637,84 @@ class FlowDataProcessor(QMainWindow):
        
     def reshape_to_xy_format(self, df_list):
         """
-        Reshape data to either:
-        1. Single row format (for one data file)
-        2. XY format (for multiple data files)
-        Each row represents a different timepoint/data file.
+        Reshape multiple DataFrames into XY format where:
+        - Each row represents a different timepoint/data file
+        - Columns are Sample_Group combinations
+        - All rows have the same number of replicates (filled with None if needed)
         """
         try:
-            # Ensure df_list is always a list
-            if not isinstance(df_list, list):
-                df_list = [df_list]
+            all_columns = set()
+            max_replicates_by_group = {}
             
-            # Create a list to store each timepoint's row
-            all_rows = []
-            new_columns = None
-            
-            # Process each DataFrame in the list
+            # First pass: collect all Sample_Group combinations and find max replicates
             for df in df_list:
-                if isinstance(df.index, pd.MultiIndex):
-                    print("MultiIndex detected - skipping this DataFrame")
-                    continue
-                
                 # Make a copy and reset index to create the Sample column
                 df_reset = df.copy()
-                df_reset.reset_index(inplace=True)
-                df_reset.columns.name = None
+                df_reset.reset_index(inplace=True, names=['Sample'])
                 
                 # Melt the DataFrame
                 melted = pd.melt(df_reset, 
-                               id_vars=['index'],
-                               var_name='Group', 
-                               value_name='Value')
+                                id_vars=['Sample'],
+                                var_name='Group', 
+                                value_name='Value')
                 
-                # Combine sample (index) and group
-                melted['Combined'] = melted['index'].astype(str) + '_' + melted['Group'].astype(str)
+                # Combine sample and group
+                melted['Sample_Group'] = melted['Sample'].astype(str) + '_' + melted['Group'].astype(str)
                 
-                # Count occurrences of each combined group
-                value_counts = melted['Combined'].value_counts()
-                max_replicates = value_counts.max()
+                # Add all Sample_Group combinations to the set
+                all_columns.update(melted['Sample_Group'].unique())
                 
-                # Create a new row of data
-                new_data = []
-                current_columns = []
-                
-                # Process each unique combined identifier in sorted order
-                for combined in sorted(melted['Combined'].unique()):
-                    # Get values for this combined identifier
-                    values = melted[melted['Combined'] == combined]['Value'].values
-                    
-                    # Add the values and extend with None for missing replicates
-                    for i in range(max_replicates):
-                        current_columns.append(combined)
-                        if i < len(values):
-                            new_data.append(values[i])
-                        else:
-                            new_data.append(None)
-                
-                # Store the columns from the first DataFrame
-                if new_columns is None:
-                    new_columns = current_columns
-                
-                all_rows.append(new_data)
+                # Update max replicates for each Sample_Group
+                for combined in melted['Sample_Group'].unique():
+                    replicate_count = len(melted[melted['Sample_Group'] == combined])
+                    max_replicates_by_group[combined] = max(
+                        max_replicates_by_group.get(combined, 0),
+                        replicate_count
+                    )
             
-            # Create result DataFrame with all rows
-            result = pd.DataFrame(all_rows, columns=new_columns)
+            # Convert to sorted list for consistent column order
+            all_columns = sorted(list(all_columns))
             
-            # Add timepoint labels if we have multiple files
-            if len(all_rows) > 1:
-                result.index = [f"Timepoint_{i+1}" for i in range(len(all_rows))]
+            # Second pass: create rows with consistent replicate counts
+            all_rows = []
+            for df in df_list:
+                # Process each DataFrame
+                df_reset = df.copy()
+                df_reset.reset_index(inplace=True, names=['Sample'])
+                
+                melted = pd.melt(df_reset, 
+                                id_vars=['Sample'],
+                                var_name='Group', 
+                                value_name='Value')
+                
+                melted['Sample_Group'] = melted['Sample'].astype(str) + '_' + melted['Group'].astype(str)
+                
+                # Create a row with values for all possible columns
+                row_data = []
+                for combined in all_columns:
+                    values = melted[melted['Sample_Group'] == combined]['Value'].values
+                    # Extend values with None to match max replicates for this group
+                    values = list(values) + [None] * (max_replicates_by_group[combined] - len(values))
+                    row_data.extend(values)
+                
+                all_rows.append(row_data)
             
+            # Create column names with consistent replicate counts
+            final_columns = []
+            for combined in all_columns:
+                final_columns.extend([combined] * max_replicates_by_group[combined])
+            
+            result = pd.DataFrame(all_rows, columns=final_columns)
             return result
-
+        
         except Exception as e:
             print(f"Error reshaping data: {str(e)}")
             print("\nDataFrame list info:")
             for i, df in enumerate(df_list):
-                print(f"\nDataFrame {i}:")
+                print(f"\nDataFrame {i} info:")
                 print(df.info())
-                print("Columns:", df.columns)
-                print("Index:", df.index)
+                print(f"DataFrame {i} columns:", df.columns)
+                print(f"DataFrame {i} index:", df.index)
             traceback.print_exc()
             raise
         
@@ -743,7 +754,7 @@ class FlowDataProcessor(QMainWindow):
         
     def save_to_csv(self):
         try:
-            result = self.process_data()  # Already handles XY format conversion
+            result = self.process_data()
             if result is not None:
                 filename, _ = QFileDialog.getSaveFileName(
                     self,
@@ -754,6 +765,9 @@ class FlowDataProcessor(QMainWindow):
                 if filename:
                     if not filename.endswith('.csv'):
                         filename += '.csv'
+                    
+                    if self.XY_radio.isChecked() and not isinstance(result.index, pd.MultiIndex):
+                        result = self.reshape_to_xy_format(result)
                     
                     result.to_csv(
                         filename,
